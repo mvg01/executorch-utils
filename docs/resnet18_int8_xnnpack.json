@@ -1,0 +1,17 @@
+{
+  "model_name": "resnet18",
+  "model_type": "cv",
+  "precision": "INT8 (PT2E Quant)",
+  "precision_short": "int8",
+  "delegate": "xnnpack",
+  "repeat": 50,
+  "warmup": 5,
+  "latency_ms": {
+    "avg": 25.74,
+    "min": 23.2,
+    "max": 32.04,
+    "std_dev": 1.68,
+    "p95": 27.94,
+    "p99": 30.42
+  }
+}

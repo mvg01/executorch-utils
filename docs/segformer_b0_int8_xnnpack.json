@@ -1,0 +1,17 @@
+{
+  "model_name": "segformer_b0",
+  "model_type": "cv_segmentation",
+  "precision": "INT8 (PT2E Quant)",
+  "precision_short": "int8",
+  "delegate": "xnnpack",
+  "repeat": 10,
+  "warmup": 5,
+  "latency_ms": {
+    "avg": 1413.69,
+    "min": 1380.34,
+    "max": 1465.92,
+    "std_dev": 25.23,
+    "p95": 1457.52,
+    "p99": 1464.24
+  }
+}

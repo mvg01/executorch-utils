@@ -1,0 +1,17 @@
+{
+  "model_name": "clip_text",
+  "model_type": "clip_text",
+  "precision": "INT8 (PT2E Quant)",
+  "precision_short": "int8",
+  "delegate": "xnnpack",
+  "repeat": 10,
+  "warmup": 5,
+  "latency_ms": {
+    "avg": 463.49,
+    "min": 429.68,
+    "max": 491.64,
+    "std_dev": 18.18,
+    "p95": 488.16,
+    "p99": 490.95
+  }
+}

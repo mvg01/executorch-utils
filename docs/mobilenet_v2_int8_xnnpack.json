@@ -1,0 +1,17 @@
+{
+  "model_name": "mobilenet_v2",
+  "model_type": "cv",
+  "precision": "INT8 (PT2E Quant)",
+  "precision_short": "int8",
+  "delegate": "xnnpack",
+  "repeat": 50,
+  "warmup": 5,
+  "latency_ms": {
+    "avg": 3.05,
+    "min": 2.65,
+    "max": 4.3,
+    "std_dev": 0.33,
+    "p95": 3.69,
+    "p99": 4.12
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "model_name": "efficientnet_b0",
+  "model_type": "cv",
+  "precision": "INT8 (PT2E Quant)",
+  "precision_short": "int8",
+  "delegate": "xnnpack",
+  "repeat": 50,
+  "warmup": 5,
+  "latency_ms": {
+    "avg": 6.49,
+    "min": 5.11,
+    "max": 17.2,
+    "std_dev": 2.29,
+    "p95": 9.39,
+    "p99": 16.45
+  }
+}

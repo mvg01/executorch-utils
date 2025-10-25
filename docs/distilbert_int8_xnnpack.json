@@ -1,0 +1,17 @@
+{
+  "model_name": "distilbert",
+  "model_type": "llm_encoder",
+  "precision": "INT8 (PT2E Quant)",
+  "precision_short": "int8",
+  "delegate": "xnnpack",
+  "repeat": 10,
+  "warmup": 5,
+  "latency_ms": {
+    "avg": 479.82,
+    "min": 463.46,
+    "max": 503.21,
+    "std_dev": 13.26,
+    "p95": 500.02,
+    "p99": 502.57
+  }
+}
