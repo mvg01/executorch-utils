@@ -1,0 +1,16 @@
+{
+  "model_name": "clip_text",
+  "model_type": "clip_text",
+  "precision": "fp32",
+  "delegate": "xnnpack",
+  "repeat": 30,
+  "warmup": 5,
+  "latency_ms": {
+    "avg": 5.56,
+    "min": 4.99,
+    "max": 8.62,
+    "std_dev": 0.84,
+    "p95": 7.29,
+    "p99": 8.28
+  }
+}

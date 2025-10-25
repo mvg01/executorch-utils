@@ -1,0 +1,16 @@
+{
+  "model_name": "efficientnet_b0",
+  "model_type": "cv",
+  "precision": "fp32",
+  "delegate": "xnnpack",
+  "repeat": 50,
+  "warmup": 5,
+  "latency_ms": {
+    "avg": 4.64,
+    "min": 4.46,
+    "max": 5.13,
+    "std_dev": 0.14,
+    "p95": 4.86,
+    "p99": 5.11
+  }
+}

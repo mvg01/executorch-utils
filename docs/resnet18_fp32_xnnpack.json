@@ -1,0 +1,16 @@
+{
+  "model_name": "resnet18",
+  "model_type": "cv",
+  "precision": "fp32",
+  "delegate": "xnnpack",
+  "repeat": 50,
+  "warmup": 5,
+  "latency_ms": {
+    "avg": 12.11,
+    "min": 11.54,
+    "max": 13.07,
+    "std_dev": 0.3,
+    "p95": 12.67,
+    "p99": 13.01
+  }
+}

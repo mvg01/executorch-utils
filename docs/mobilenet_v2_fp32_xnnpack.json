@@ -1,0 +1,16 @@
+{
+  "model_name": "mobilenet_v2",
+  "model_type": "cv",
+  "precision": "fp32",
+  "delegate": "xnnpack",
+  "repeat": 50,
+  "warmup": 5,
+  "latency_ms": {
+    "avg": 2.37,
+    "min": 2.16,
+    "max": 3.81,
+    "std_dev": 0.23,
+    "p95": 2.5,
+    "p99": 3.25
+  }
+}

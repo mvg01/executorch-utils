@@ -1,0 +1,16 @@
+{
+  "model_name": "distilbert",
+  "model_type": "llm_encoder",
+  "precision": "fp32",
+  "delegate": "portable",
+  "repeat": 10,
+  "warmup": 5,
+  "latency_ms": {
+    "avg": 736.23,
+    "min": 680.76,
+    "max": 803.43,
+    "std_dev": 41.31,
+    "p95": 798.9,
+    "p99": 802.52
+  }
+}

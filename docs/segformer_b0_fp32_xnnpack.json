@@ -1,0 +1,16 @@
+{
+  "model_name": "segformer_b0",
+  "model_type": "cv_segmentation",
+  "precision": "fp32",
+  "delegate": "xnnpack",
+  "repeat": 10,
+  "warmup": 5,
+  "latency_ms": {
+    "avg": 260.78,
+    "min": 248.43,
+    "max": 271.86,
+    "std_dev": 6.61,
+    "p95": 269.77,
+    "p99": 271.45
+  }
+}

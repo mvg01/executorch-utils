@@ -1,0 +1,16 @@
+{
+  "model_name": "clip_text",
+  "model_type": "clip_text",
+  "precision": "fp32",
+  "delegate": "portable",
+  "repeat": 30,
+  "warmup": 5,
+  "latency_ms": {
+    "avg": 669.54,
+    "min": 589.15,
+    "max": 811.62,
+    "std_dev": 55.06,
+    "p95": 763.87,
+    "p99": 800.02
+  }
+}
