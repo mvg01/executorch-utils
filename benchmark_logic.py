@@ -15,10 +15,11 @@ from transformers import (
 )
 
 from executorch.runtime import Runtime 
-from executorch.exir import to_edge, EdgeCompileConfig
+from executorch.exir import to_edge_transform_and_lower, EdgeCompileConfig, to_edge
 from executorch.backends.xnnpack.partition.xnnpack_partitioner import XnnpackPartitioner
 
-from executorch.backends.xnnpack.quantizer.xnnpack_quantizer import (
+# 양자화 관련
+from torch.ao.quantization.quantizer.xnnpack_quantizer import (
     get_symmetric_quantization_config,
     XNNPACKQuantizer,
 )
@@ -108,7 +109,7 @@ def run_full_benchmark_task(
     model_config = MODEL_CONFIGS[model_name]
     model_type = model_config["type"]
     model_id = model_config.get("model_id_for_load", model_name)
-    warmup_runs = 5
+    warmup_runs = model_config.get("warmup_runs", 5)
     measure_runs = repeat
 
     precision_short_str = 'int8' if precision == 'INT8 (PT2E Quant)' else 'fp32'
@@ -120,6 +121,7 @@ def run_full_benchmark_task(
     example_args = None
     example_kwargs = {}
     et_inputs_list = None
+    program = None # 최종 ExecuTorch Program
 
     try:
         # --- Phase 2: 모델 로드 및 입력 생성 ---
@@ -147,65 +149,76 @@ def run_full_benchmark_task(
         et_inputs_list = list(example_args)
         log_callback(f"Model '{model_name}' loaded successfully.")
 
-        # --- Phase 2.5: INT8 양자화 또는 FP32 Export ---
+        # --- Phase 2.5: Quantization / FP32 Export ---
         if precision == "INT8 (PT2E Quant)":
+            # --- INT8 PATH ---
             log_callback("\n[Phase 2.5] Applying INT8 Quantization (torchao PT2E)...")
             
-            try:
-                # Step 1: export_for_training (ExecuTorch 공식)
-                log_callback("  1. Exporting with export_for_training...")
-                with torch.no_grad():
-                    training_gm = torch.export.export_for_training(model, example_args).module()
-                log_callback("     Training GraphModule created.")
+            # Step 1: Export for training (ExecuTorch 공식)
+            log_callback("  1. Exporting with export_for_training...")
+            with torch.no_grad():
+                training_gm = torch.export.export_for_training(model, example_args).module()
+            log_callback("     Training GraphModule created.")
 
-                # Step 2: Quantizer 설정
-                log_callback("  2. Setting up XNNPACKQuantizer...")
-                quantizer = XNNPACKQuantizer()
-                quantization_config = get_symmetric_quantization_config(
-                    is_per_channel=False  # per-tensor로 변경 (ExecuTorch 호환)
+            # Step 2: Quantizer 설정 (per-tensor)
+            log_callback("  2. Setting up XNNPACKQuantizer...")
+            quantizer = XNNPACKQuantizer()
+            quantization_config = get_symmetric_quantization_config(
+                is_per_channel=False 
+            )
+            quantizer.set_global(quantization_config)
+            log_callback("     Quantizer configured (per-tensor).")
+
+            # Step 3: Prepare 
+            log_callback("  3. Preparing model (prepare_pt2e)...")
+            prepared_model = prepare_pt2e(training_gm, quantizer)
+            log_callback("     Model prepared with observers.")
+
+            # Step 4: Calibration
+            log_callback("  4. Running calibration (10 batches)...")
+            with torch.no_grad():
+                for i in range(10):
+                    calib_inputs = _get_calibration_inputs(model_type, model_id)
+                    try:
+                        _ = prepared_model(*calib_inputs)
+                        if (i + 1) % 5 == 0: log_callback(f"     Batch {i+1}/10: Complete")
+                    except Exception as e:
+                        log_callback(f"     Batch {i+1}/10: Warning - {str(e)[:60]}")
+            log_callback("     Calibration complete.")
+
+            # Step 5: Convert
+            log_callback("  5. Converting to INT8 (convert_pt2e)...")
+            quantized_model = convert_pt2e(prepared_model)
+            log_callback("     INT8 conversion complete.")
+
+            # Step 6: Final export (Quantized model)
+            log_callback("  6. Final export to ExportedProgram...")
+            with torch.no_grad():
+                exported_program = torch.export.export(
+                    quantized_model,
+                    args=example_args,
+                    strict=False
                 )
-                quantizer.set_global(quantization_config)
-                log_callback("     Quantizer configured (per-tensor).")
-
-                # Step 3: Prepare (torchao API)
-                log_callback("  3. Preparing model (prepare_pt2e)...")
-                prepared_model = prepare_pt2e(training_gm, quantizer)
-                log_callback("     Model prepared with observers.")
-
-                # Step 4: Calibration
-                log_callback("  4. Running calibration (10 batches)...")
-                with torch.no_grad():
-                    for i in range(10):
-                        calib_inputs = _get_calibration_inputs(model_type, model_id)
-                        try:
-                            _ = prepared_model(*calib_inputs)
-                            if (i + 1) % 5 == 0:
-                                log_callback(f"     Batch {i+1}/10: Complete")
-                        except Exception as e:
-                            log_callback(f"     Batch {i+1}/10: Warning - {str(e)[:60]}")
-                log_callback("     Calibration complete.")
-
-                # Step 5: Convert (torchao API)
-                log_callback("  5. Converting to INT8 (convert_pt2e)...")
-                quantized_model = convert_pt2e(prepared_model)
-                log_callback("     INT8 conversion complete.")
-
-                # Step 6: Final export
-                log_callback("  6. Final export to ExportedProgram...")
-                with torch.no_grad():
-                    exported_program = torch.export.export(
-                        quantized_model,
-                        args=example_args,
-                        strict=False
-                    )
-                log_callback("     Quantized model exported.")
-
-            except Exception as e:
-                log_callback(f"[ERROR] INT8 Quantization failed: {e}")
-                log_callback(traceback.format_exc())
-                return None
+            log_callback("     Quantized model exported.")
+            
+            # --- Phase 3 & 4 (INT8): to_edge + Lowering ---
+            log_callback(f"\n[Phase 3] Converting to EdgeProgram and Lowering ({delegate})...")
+            
+            partitioners = [XnnpackPartitioner()] if delegate == "xnnpack" else []
+            
+            # [FIX] to_edge_transform_and_lower 대신 to_edge + to_backend 사용 (양자화 필수)
+            edge_config = EdgeCompileConfig(_check_ir_validity=False, _skip_dim_order=True)
+            edge_program = edge_program = edge_program = to_edge(exported_program, compile_config=edge_config)
+            
+            if delegate == "xnnpack":
+                program = edge_program.to_backend(partitioners[0]).to_executorch()
+                log_callback("     XNNPACK Lowering applied (INT8).")
+            else:
+                program = edge_program.to_executorch()
+                log_callback("     Portable Lowering applied (INT8).")
+                
         else:
-            # FP32 경로
+            # --- FP32 PATH ---
             log_callback("\n[Phase 2.5] Exporting model (FP32)...")
             with torch.no_grad():
                 exported_program = torch.export.export(
@@ -215,31 +228,23 @@ def run_full_benchmark_task(
                 )
             log_callback("Model exported successfully (FP32).")
 
-        # --- Phase 3: to_edge 변환 ---
-        log_callback(f"\n[Phase 3] Converting to EdgeProgram...")
-        edge_config = EdgeCompileConfig(
-            _check_ir_validity=False,
-            _skip_dim_order=True  # 양자화 모델에 필요
-        )
-        edge_program = to_edge(
-            exported_program,
-            compile_config=edge_config
-        )
-        log_callback("EdgeProgram created.")
+            # --- Phase 3 & 4 (FP32): to_edge_transform_and_lower 사용 ---
+            log_callback(f"\n[Phase 3] Converting to EdgeProgram and Lowering ({delegate})...")
 
-        # --- Phase 4: Partitioner 적용 (델리게이트) ---
-        log_callback(f"\n[Phase 4] Applying delegate ({delegate})...")
+            if delegate == "xnnpack":
+                partitioners = [XnnpackPartitioner()]
+                log_callback("     Using XNNPACK partitioner.")
+            else:
+                partitioners = []
+                log_callback("     Using Portable partitioner.")
 
-        if delegate == "xnnpack":
-            partitioner = XnnpackPartitioner()
-            edge_program = edge_program.to_backend(partitioner)
-            log_callback("XNNPACK partitioner applied.")
-        else:
-            log_callback("Using Portable (no partitioner).")
+            # [FIXED] 최적화가 잘 되었던 'to_edge_transform_and_lower' API 사용
+            program = to_edge_transform_and_lower(
+                exported_program,
+                partitioner=partitioners
+            ).to_executorch()
+            log_callback("     FP32 model converted and lowered successfully.")
 
-        # --- Phase 5: to_executorch 변환 ---
-        log_callback("Converting to ExecutorchProgram...")
-        program = edge_program.to_executorch()
 
         # --- Phase 6: .pte 저장 ---
         log_callback(f"\n[Phase 6] Saving compiled model to {pte_path}...")
