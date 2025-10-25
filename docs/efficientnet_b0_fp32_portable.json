@@ -1,16 +1,17 @@
 {
   "model_name": "efficientnet_b0",
   "model_type": "cv",
-  "precision": "fp32",
+  "precision": "FP32",
+  "precision_short": "fp32",
   "delegate": "portable",
   "repeat": 50,
   "warmup": 5,
   "latency_ms": {
-    "avg": 909.3,
-    "min": 893.24,
-    "max": 929.46,
-    "std_dev": 8.14,
-    "p95": 923.54,
-    "p99": 928.27
+    "avg": 910.45,
+    "min": 883.85,
+    "max": 978.88,
+    "std_dev": 21.47,
+    "p95": 951.59,
+    "p99": 967.38
   }
 }

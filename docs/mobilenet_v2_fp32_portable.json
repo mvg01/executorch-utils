@@ -1,16 +1,17 @@
 {
   "model_name": "mobilenet_v2",
   "model_type": "cv",
-  "precision": "fp32",
+  "precision": "FP32",
+  "precision_short": "fp32",
   "delegate": "portable",
   "repeat": 50,
   "warmup": 5,
   "latency_ms": {
-    "avg": 724.68,
-    "min": 706.2,
-    "max": 801.09,
-    "std_dev": 14.47,
-    "p95": 741.34,
-    "p99": 784.39
+    "avg": 719.04,
+    "min": 696.65,
+    "max": 854.88,
+    "std_dev": 27.97,
+    "p95": 755.07,
+    "p99": 835.55
   }
 }

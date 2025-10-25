@@ -1,16 +1,17 @@
 {
   "model_name": "clip_text",
   "model_type": "clip_text",
-  "precision": "fp32",
+  "precision": "FP32",
+  "precision_short": "fp32",
   "delegate": "xnnpack",
-  "repeat": 30,
-  "warmup": 5,
+  "repeat": 10,
+  "warmup": 3,
   "latency_ms": {
     "avg": 5.56,
-    "min": 4.99,
-    "max": 8.62,
-    "std_dev": 0.84,
-    "p95": 7.29,
-    "p99": 8.28
+    "min": 4.98,
+    "max": 6.95,
+    "std_dev": 0.62,
+    "p95": 6.7,
+    "p99": 6.9
   }
 }

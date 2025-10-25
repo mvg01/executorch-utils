@@ -5,13 +5,13 @@
   "precision_short": "int8",
   "delegate": "xnnpack",
   "repeat": 10,
-  "warmup": 5,
+  "warmup": 3,
   "latency_ms": {
-    "avg": 463.49,
-    "min": 429.68,
-    "max": 491.64,
-    "std_dev": 18.18,
-    "p95": 488.16,
-    "p99": 490.95
+    "avg": 439.78,
+    "min": 395.55,
+    "max": 502.23,
+    "std_dev": 26.37,
+    "p95": 480.22,
+    "p99": 497.82
   }
 }

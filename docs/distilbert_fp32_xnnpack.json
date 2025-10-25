@@ -1,16 +1,17 @@
 {
   "model_name": "distilbert",
   "model_type": "llm_encoder",
-  "precision": "fp32",
+  "precision": "FP32",
+  "precision_short": "fp32",
   "delegate": "xnnpack",
   "repeat": 10,
-  "warmup": 5,
+  "warmup": 3,
   "latency_ms": {
-    "avg": 5.19,
-    "min": 4.75,
-    "max": 6.22,
-    "std_dev": 0.45,
-    "p95": 6.01,
-    "p99": 6.18
+    "avg": 4.99,
+    "min": 4.73,
+    "max": 5.55,
+    "std_dev": 0.23,
+    "p95": 5.37,
+    "p99": 5.51
   }
 }

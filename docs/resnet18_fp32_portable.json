@@ -1,16 +1,17 @@
 {
   "model_name": "resnet18",
   "model_type": "cv",
-  "precision": "fp32",
+  "precision": "FP32",
+  "precision_short": "fp32",
   "delegate": "portable",
   "repeat": 50,
   "warmup": 5,
   "latency_ms": {
-    "avg": 2017.98,
-    "min": 1941.32,
-    "max": 2467.74,
-    "std_dev": 74.78,
-    "p95": 2076.88,
-    "p99": 2296.03
+    "avg": 1988.98,
+    "min": 1934.77,
+    "max": 2073.08,
+    "std_dev": 27.89,
+    "p95": 2034.13,
+    "p99": 2057.96
   }
 }
