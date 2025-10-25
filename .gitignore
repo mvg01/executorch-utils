@@ -66,3 +66,5 @@ pip-delete-this-directory.txt
 .pyre/
 .pytype/
 cython_debug/
+
+/docs
