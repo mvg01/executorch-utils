@@ -5,6 +5,9 @@ PyTorch 모델을 ExecuTorch(`.pte`)로 변환하고, 지정된 횟수만큼 추
 ### 백엔드 (`benchmark_logic.py`)
 
 - **동적 모델 로드**: `torchvision.models` 또는 `transformers` 라이브러리에서 `resnet18`, `mobilenet_v2`, `distilbert`, `segformer_b0` 등 다양한 모델을 문자열 이름으로 로드합니다.
+  - 컴퓨터 비전 (CV): `resnet18`, `mobilenet_v2`, `efficientnet_b0`
+  - 분할 (Segmentation): `segformer_b0`
+  - 트랜스포머/LLM 인코더: `distilbert`, `clip_text`
 - **정밀도 선택 (FP32/INT8)**:
   - **FP32**: `torch.export` 및 `to_edge_transform_and_lower` API를 사용하여 FP32 모델을 `.pte` 파일로 자동 변환합니다.
   - **INT8 (PTQ)**: ExecuTorch의 `XNNPACKQuantizer`를 활용한 Post-Training Quantization(학습 후 양자화) 기능을 구현했습니다. `per-tensor` 방식을 사용하여 런타임 호환성을 확보했습니다.
