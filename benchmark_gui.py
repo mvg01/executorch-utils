@@ -15,7 +15,7 @@ except ImportError:
 class ExecuTorchBenchGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("ExecuTorch FP32 Delegate Benchmark Tool")
+        self.root.title("ExecuTorch Delegate Benchmark Tool") 
         self.root.geometry("650x550")
 
         self.log_queue = queue.Queue()
@@ -32,7 +32,7 @@ class ExecuTorchBenchGUI:
         self.model_var = tk.StringVar()
         self.model_combo = ttk.Combobox(config_frame, textvariable=self.model_var, width=25, state="readonly")
         try:
-            self.model_configs = benchmark_logic.MODEL_CONFIGS
+            self.model_configs = benchmark_logic.MODEL_CONFIGS 
             model_list = sorted(list(self.model_configs.keys()))
             self.model_combo['values'] = model_list
             if model_list: self.model_var.set(model_list[0])
@@ -49,18 +49,24 @@ class ExecuTorchBenchGUI:
         self.repeat_spinbox.grid(row=0, column=3, padx=5, pady=5, sticky="w")
         self.on_model_select() # 초기값 설정
 
-        # 델리게이트 
-        ttk.Label(config_frame, text="Delegate:").grid(row=1, column=0, padx=5, pady=5, sticky="e")
+        ttk.Label(config_frame, text="Precision:").grid(row=1, column=0, padx=5, pady=5, sticky="e")
+        self.precision_var = tk.StringVar(value="FP32")
+        self.precision_combo = ttk.Combobox(config_frame, textvariable=self.precision_var, width=25, state="readonly")
+        self.precision_combo['values'] = ["FP32", "INT8 (PT2E Quant)"]
+        self.precision_combo.grid(row=1, column=1, padx=5, pady=5, sticky="w")
+
+        ttk.Label(config_frame, text="Delegate:").grid(row=2, column=0, padx=5, pady=5, sticky="e")
         self.delegate_var = tk.StringVar(value="xnnpack")
-        ttk.Radiobutton(config_frame, text="XNNPACK", variable=self.delegate_var, value="xnnpack").grid(row=1, column=1, padx=(5, 10), pady=5, sticky="w") # 간격 조정
-        ttk.Radiobutton(config_frame, text="Portable", variable=self.delegate_var, value="portable").grid(row=1, column=1, padx=(90, 0), pady=5, sticky="w") # 간격 조정 (80->90)
+        ttk.Radiobutton(config_frame, text="XNNPACK", variable=self.delegate_var, value="xnnpack").grid(row=2, column=1, padx=(5, 10), pady=5, sticky="w")
+        ttk.Radiobutton(config_frame, text="Portable", variable=self.delegate_var, value="portable").grid(row=2, column=1, padx=(90, 0), pady=5, sticky="w")
 
         config_frame.grid_columnconfigure(1, weight=1)
 
         # 실행 및 저장 버튼 
         button_frame = ttk.Frame(main_frame)
         button_frame.pack(fill="x", padx=5, pady=(5, 10))
-        self.run_button = ttk.Button(button_frame, text="🚀 Run FP32 Benchmark", command=self.start_benchmark_task) # 버튼 텍스트 변경
+        
+        self.run_button = ttk.Button(button_frame, text="🚀 Run Benchmark", command=self.start_benchmark_task) 
         self.run_button.pack(side="left", fill="x", expand=True, padx=(0, 5))
         self.save_button = ttk.Button(button_frame, text="💾 Save Results (JSON)", command=self.save_results, state="disabled")
         self.save_button.pack(side="left", fill="x", expand=True, padx=(5, 0))
@@ -92,23 +98,24 @@ class ExecuTorchBenchGUI:
         model = self.model_var.get()
         repeat = self.repeat_var.get()
         delegate = self.delegate_var.get()
+        precision = self.precision_var.get() 
 
         if model == "Error":
              messagebox.showerror("Error", "모델 설정을 불러오지 못했습니다.")
-             self.run_button.config(text="🚀 Run FP32 Benchmark", state="normal")
+             self.run_button.config(text="Run Benchmark", state="normal")
              return
 
         threading.Thread(
             target=self.run_benchmark_in_thread,
-            args=(model, repeat, delegate),
+            args=(model, repeat, delegate, precision), 
             daemon=True
         ).start()
 
-    def run_benchmark_in_thread(self, model, repeat, delegate):
+    def run_benchmark_in_thread(self, model, repeat, delegate, precision): 
         def thread_safe_log(message): self.log_queue.put(message)
         try:
             final_result = benchmark_logic.run_full_benchmark_task(
-                model, repeat, delegate, thread_safe_log
+                model, repeat, delegate, precision, thread_safe_log
             )
             if final_result:
                 self.final_results_json = final_result
@@ -130,7 +137,7 @@ class ExecuTorchBenchGUI:
             while True:
                 message = self.log_queue.get_nowait()
                 if message == "---TASK_COMPLETE---":
-                    self.run_button.config(text="Run FP32 Benchmark", state="normal")
+                    self.run_button.config(text="Run Benchmark", state="normal")
                     if self.final_results_json: self.save_button.config(state="normal")
                 else: self.log_to_gui(message)
         except queue.Empty: pass
@@ -147,10 +154,13 @@ class ExecuTorchBenchGUI:
             messagebox.showwarning("No Data", "저장할 벤치마크 결과가 없습니다.")
             return
 
-        # 파일명: 모델명_fp32_델리게이트명.json
         model_name = self.final_results_json.get('model_name', 'results')
+        # 'precision_short' 키 (예: 'fp32' or 'int8')를 benchmark_logic.py에서 반환받음
+        precision_str = self.final_results_json.get('precision_short', 'fp32') 
         delegate_name = self.final_results_json.get('delegate', 'unknown')
-        initial_filename = f"{model_name}_fp32_{delegate_name}.json" 
+        
+        # 파일명: 모델명_정밀도_델리게이트명.json
+        initial_filename = f"{model_name}_{precision_str}_{delegate_name}.json" 
 
         file_path = filedialog.asksaveasfilename(
             title="Save Benchmark Results",

@@ -5,6 +5,7 @@ import torchvision.models as models
 import numpy as np
 import json
 from torch.utils import _pytree as pytree
+import traceback
 
 from transformers import (
     AutoTokenizer,
@@ -13,156 +14,261 @@ from transformers import (
     CLIPTextModel
 )
 
-from executorch.runtime import Runtime
-from executorch.exir import (
-    to_edge_transform_and_lower,
-)
+from executorch.runtime import Runtime 
+from executorch.exir import to_edge, EdgeCompileConfig
 from executorch.backends.xnnpack.partition.xnnpack_partitioner import XnnpackPartitioner
 
+from executorch.backends.xnnpack.quantizer.xnnpack_quantizer import (
+    get_symmetric_quantization_config,
+    XNNPACKQuantizer,
+)
+from torchao.quantization.pt2e.quantize_pt2e import convert_pt2e, prepare_pt2e
 
 MODEL_CONFIGS = {
     "resnet18": {
-        "type": "cv", "measure_runs": 50, "warmup_runs": 10, "assert_tolerance": 1e-5,
+        "type": "cv", "measure_runs": 50, "warmup_runs": 5, "assert_tolerance": 1e-5,
     },
     "mobilenet_v2": {
-        "type": "cv", "measure_runs": 50, "warmup_runs": 10, "assert_tolerance": 1e-5,
+        "type": "cv", "measure_runs": 50, "warmup_runs": 5, "assert_tolerance": 1e-5,
     },
     "distilbert": {
         "type": "llm_encoder", "model_id_for_load": "distilbert-base-uncased",
-        "measure_runs": 10, "warmup_runs": 5, "assert_tolerance": 1e-3,
+        "measure_runs": 10, "warmup_runs": 3, "assert_tolerance": 1e-3,
     },
     "clip_text": {
         "type": "clip_text", "model_id_for_load": "openai/clip-vit-base-patch32",
-        "measure_runs": 30, "warmup_runs": 5, "assert_tolerance": 1e-3,
+        "measure_runs": 10, "warmup_runs": 3, "assert_tolerance": 1e-3,
     },
     "efficientnet_b0": {
-        "type": "cv", "measure_runs": 50, "warmup_runs": 10, "assert_tolerance": 1e-5,
+        "type": "cv", "measure_runs": 50, "warmup_runs": 5, "assert_tolerance": 1e-5,
     },
     "segformer_b0": {
         "type": "cv_segmentation", "model_id_for_load": "nvidia/segformer-b0-finetuned-ade-512-512",
-        "measure_runs": 10, "warmup_runs": 2, "assert_tolerance": 1e-3,
+        "measure_runs": 10, "warmup_runs": 3, "assert_tolerance": 1e-3,
     },
 }
 
-def measure_latency(func, warmup_runs: int, measure_runs: int, status_callback):
+def measure_latency(func, warmup_runs: int, measure_runs: int, log_callback):
     latencies = []
-    status_callback(f"Warming up ({warmup_runs} runs)...")
-    for _ in range(warmup_runs): _ = func()
-    status_callback(f"Warmup complete. Starting benchmark ({measure_runs} runs)...")
+    log_callback(f"Warming up ({warmup_runs} runs)...")
+    for _ in range(warmup_runs): 
+        _ = func()
+    log_callback(f"Warmup complete. Starting benchmark ({measure_runs} runs)...")
     for i in range(measure_runs):
         start_time = time.perf_counter()
         result = func()
         end_time = time.perf_counter()
         latencies.append((end_time - start_time) * 1000)
         if (i + 1) % 10 == 0 or (i + 1) == measure_runs:
-             status_callback(f"  Run {i+1}/{measure_runs} complete.")
-    avg_latency = np.mean(latencies); max_latency = np.max(latencies)
-    min_latency = np.min(latencies); std_dev = np.std(latencies)
-    p95 = np.percentile(latencies, 95); p99 = np.percentile(latencies, 99)
+             log_callback(f"  Run {i+1}/{measure_runs} complete.")
+    avg_latency = np.mean(latencies)
+    max_latency = np.max(latencies)
+    min_latency = np.min(latencies)
+    std_dev = np.std(latencies)
+    p95 = np.percentile(latencies, 95)
+    p99 = np.percentile(latencies, 99)
     return {"avg": avg_latency, "max": max_latency, "min": min_latency,
             "std_dev": std_dev, "p95": p95, "p99": p99}
 
 
-# GUI가 호출할 메인 함수 
-def run_full_benchmark_task(model_name: str, repeat_from_gui: int, delegate: str, status_callback) -> dict | None:
+def _get_calibration_inputs(model_type, model_id):
+    """캘리브레이션용 입력 데이터 생성"""
+    try:
+        if model_type == "cv":
+            return (torch.randn(1, 3, 224, 224),)
+        elif model_type == "llm_encoder":
+            tokenizer = AutoTokenizer.from_pretrained(model_id)
+            token_inputs = tokenizer("Sample calibration text for quantization.", return_tensors="pt")
+            return (token_inputs['input_ids'], token_inputs['attention_mask'])
+        elif model_type == "clip_text":
+            tokenizer = AutoTokenizer.from_pretrained(model_id)
+            token_inputs = tokenizer("a photo of a cat", return_tensors="pt")
+            return (token_inputs['input_ids'], token_inputs['attention_mask'])
+        elif model_type == "cv_segmentation":
+            return (torch.randn(1, 3, 512, 512),)
+        else:
+            return (torch.randn(1, 3, 224, 224),)
+    except Exception:
+        return (torch.randn(1, 3, 224, 224),)
 
-    status_callback(f"\n[Phase 1] Loading config for: {model_name}")
+
+def run_full_benchmark_task(
+    model_name: str, 
+    repeat: int,
+    delegate: str, 
+    precision: str,
+    log_callback
+) -> dict | None:
+
+    log_callback(f"\n[Phase 1] Loading config for: {model_name}")
     if model_name not in MODEL_CONFIGS:
-        status_callback(f"Error: Model '{model_name}' not found in MODEL_CONFIGS.")
+        log_callback(f"Error: Model '{model_name}' not found in MODEL_CONFIGS.")
         return None
 
     model_config = MODEL_CONFIGS[model_name]
     model_type = model_config["type"]
     model_id = model_config.get("model_id_for_load", model_name)
     warmup_runs = 5
-    measure_runs = repeat_from_gui
+    measure_runs = repeat
 
-    precision = "fp32"
-    pte_path = f"temp_{model_name}_{precision}_{delegate}.pte"
-    status_callback(f"Config loaded. Type: {model_type}, Precision: {precision}, Delegate: {delegate}")
+    precision_short_str = 'int8' if precision == 'INT8 (PT2E Quant)' else 'fp32'
+    pte_path = f"temp_{model_name}_{precision_short_str}_{delegate}.pte"
+    
+    log_callback(f"Config loaded. Type: {model_type}, Precision: {precision}, Delegate: {delegate}")
 
     model = None
     example_args = None
-    example_kwargs = None
+    example_kwargs = {}
     et_inputs_list = None
 
     try:
-        # 모델 로드 및 입력 생성
-        status_callback(f"\n[Phase 2] Loading model and creating inputs...")
+        # --- Phase 2: 모델 로드 및 입력 생성 ---
+        log_callback(f"\n[Phase 2] Loading model and creating inputs...")
 
         if model_type == "cv":
             model = getattr(models, model_name)(weights="DEFAULT").eval()
             example_args = (torch.randn(1, 3, 224, 224),)
-            example_kwargs = {}
         elif model_type == "llm_encoder":
             model = AutoModel.from_pretrained(model_id).eval()
             tokenizer = AutoTokenizer.from_pretrained(model_id)
             token_inputs = tokenizer("Hello, world!", return_tensors="pt")
             example_args = (token_inputs['input_ids'], token_inputs['attention_mask'])
-            example_kwargs = {}
         elif model_type == "clip_text":
             model = CLIPTextModel.from_pretrained(model_id).eval()
             tokenizer = AutoTokenizer.from_pretrained(model_id)
             token_inputs = tokenizer("a photo of a cat", return_tensors="pt")
             example_args = (token_inputs['input_ids'], token_inputs['attention_mask'])
-            example_kwargs = {}
         elif model_type == "cv_segmentation":
             model = AutoModelForSemanticSegmentation.from_pretrained(model_id).eval()
             example_args = (torch.randn(1, 3, 512, 512),)
-            example_kwargs = {}
-        else: raise ValueError(f"Unsupported model type: {model_type}")
+        else:
+            raise ValueError(f"Unsupported model type: {model_type}")
 
-        et_inputs_list = list(example_args) + list(example_kwargs.values())
-        status_callback(f"Model '{model_name}' loaded successfully.")
+        et_inputs_list = list(example_args)
+        log_callback(f"Model '{model_name}' loaded successfully.")
 
-        status_callback(f"\n[Phase 3] Compiling/Lowering model (Precision: {precision})...") # Phase 번호 조정
+        # --- Phase 2.5: INT8 양자화 또는 FP32 Export ---
+        if precision == "INT8 (PT2E Quant)":
+            log_callback("\n[Phase 2.5] Applying INT8 Quantization (torchao PT2E)...")
+            
+            try:
+                # Step 1: export_for_training (ExecuTorch 공식)
+                log_callback("  1. Exporting with export_for_training...")
+                with torch.no_grad():
+                    training_gm = torch.export.export_for_training(model, example_args).module()
+                log_callback("     Training GraphModule created.")
+
+                # Step 2: Quantizer 설정
+                log_callback("  2. Setting up XNNPACKQuantizer...")
+                quantizer = XNNPACKQuantizer()
+                quantization_config = get_symmetric_quantization_config(
+                    is_per_channel=False  # per-tensor로 변경 (ExecuTorch 호환)
+                )
+                quantizer.set_global(quantization_config)
+                log_callback("     Quantizer configured (per-tensor).")
+
+                # Step 3: Prepare (torchao API)
+                log_callback("  3. Preparing model (prepare_pt2e)...")
+                prepared_model = prepare_pt2e(training_gm, quantizer)
+                log_callback("     Model prepared with observers.")
+
+                # Step 4: Calibration
+                log_callback("  4. Running calibration (10 batches)...")
+                with torch.no_grad():
+                    for i in range(10):
+                        calib_inputs = _get_calibration_inputs(model_type, model_id)
+                        try:
+                            _ = prepared_model(*calib_inputs)
+                            if (i + 1) % 5 == 0:
+                                log_callback(f"     Batch {i+1}/10: Complete")
+                        except Exception as e:
+                            log_callback(f"     Batch {i+1}/10: Warning - {str(e)[:60]}")
+                log_callback("     Calibration complete.")
+
+                # Step 5: Convert (torchao API)
+                log_callback("  5. Converting to INT8 (convert_pt2e)...")
+                quantized_model = convert_pt2e(prepared_model)
+                log_callback("     INT8 conversion complete.")
+
+                # Step 6: Final export
+                log_callback("  6. Final export to ExportedProgram...")
+                with torch.no_grad():
+                    exported_program = torch.export.export(
+                        quantized_model,
+                        args=example_args,
+                        strict=False
+                    )
+                log_callback("     Quantized model exported.")
+
+            except Exception as e:
+                log_callback(f"[ERROR] INT8 Quantization failed: {e}")
+                log_callback(traceback.format_exc())
+                return None
+        else:
+            # FP32 경로
+            log_callback("\n[Phase 2.5] Exporting model (FP32)...")
+            with torch.no_grad():
+                exported_program = torch.export.export(
+                    model, 
+                    args=example_args,
+                    strict=False
+                )
+            log_callback("Model exported successfully (FP32).")
+
+        # --- Phase 3: to_edge 변환 ---
+        log_callback(f"\n[Phase 3] Converting to EdgeProgram...")
+        edge_config = EdgeCompileConfig(
+            _check_ir_validity=False,
+            _skip_dim_order=True  # 양자화 모델에 필요
+        )
+        edge_program = to_edge(
+            exported_program,
+            compile_config=edge_config
+        )
+        log_callback("EdgeProgram created.")
+
+        # --- Phase 4: Partitioner 적용 (델리게이트) ---
+        log_callback(f"\n[Phase 4] Applying delegate ({delegate})...")
 
         if delegate == "xnnpack":
-            partitioners = [XnnpackPartitioner()]
-        elif delegate == "portable":
-            partitioners = []
+            partitioner = XnnpackPartitioner()
+            edge_program = edge_program.to_backend(partitioner)
+            log_callback("XNNPACK partitioner applied.")
         else:
-            status_callback(f"Warning: Unknown delegate '{delegate}'. Using portable.")
-            partitioners = []
+            log_callback("Using Portable (no partitioner).")
 
-        status_callback("Using 'torch.export' + 'to_edge_transform_and_lower' (FP32 Path)")
+        # --- Phase 5: to_executorch 변환 ---
+        log_callback("Converting to ExecutorchProgram...")
+        program = edge_program.to_executorch()
 
-        # Export
-        exported_program = torch.export.export(model, args=example_args, kwargs=example_kwargs)
-        status_callback("Model exported successfully.")
-
-        # Compile
-        program = to_edge_transform_and_lower(
-            exported_program,
-            partitioner=partitioners
-        ).to_executorch()
-
-
-        status_callback(f"Saving compiled model to {pte_path}...")
+        # --- Phase 6: .pte 저장 ---
+        log_callback(f"\n[Phase 6] Saving compiled model to {pte_path}...")
         with open(pte_path, "wb") as f:
             f.write(program.buffer)
-        status_callback(f".pte file created successfully.")
+        file_size_kb = os.path.getsize(pte_path) / 1024
+        log_callback(f".pte file created successfully ({file_size_kb:.1f} KB).")
 
-
-        # 벤치마크 실행
-        status_callback(f"\n[Phase 4] Running benchmark...")
+        # --- Phase 7: 벤치마크 실행 ---
+        log_callback(f"\n[Phase 7] Running benchmark...")
+        
         runtime = Runtime.get()
         method = runtime.load_program(pte_path).load_method("forward")
 
         def executorch_run():
             return method.execute(et_inputs_list)
 
-        latency_results = measure_latency(executorch_run, warmup_runs, measure_runs, status_callback)
+        latency_results = measure_latency(executorch_run, warmup_runs, measure_runs, log_callback)
 
         del method
         del runtime
-        status_callback("Benchmark complete.")
+        log_callback("Benchmark complete.")
 
-        # 결과 포맷팅
+        # --- Phase 8: 결과 포맷팅 ---
         final_results = {
             "model_name": model_name,
             "model_type": model_type,
             "precision": precision,
+            "precision_short": precision_short_str,
             "delegate": delegate,
             "repeat": measure_runs,
             "warmup": warmup_runs,
@@ -178,10 +284,9 @@ def run_full_benchmark_task(model_name: str, repeat_from_gui: int, delegate: str
         return final_results
 
     except Exception as e:
-        status_callback(f"\nFATAL ERROR")
-        status_callback(f"An exception occurred: {e}")
-        import traceback
-        status_callback(traceback.format_exc())
+        log_callback(f"\n[FATAL ERROR]")
+        log_callback(f"Exception occurred: {e}")
+        log_callback(traceback.format_exc())
         return None
 
     finally:
@@ -189,6 +294,6 @@ def run_full_benchmark_task(model_name: str, repeat_from_gui: int, delegate: str
             try:
                 time.sleep(0.1)
                 os.remove(pte_path)
-                status_callback(f"\nTemporary file {pte_path} removed successfully.")
+                log_callback(f"\nTemporary file {pte_path} removed successfully.")
             except Exception as e:
-                status_callback(f"Warning: Failed to remove temporary file {pte_path}: {e}")
+                log_callback(f"Warning: Failed to remove temporary file {pte_path}: {e}")
