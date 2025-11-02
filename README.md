@@ -10,7 +10,7 @@ PyTorch 모델을 ExecuTorch(`.pte`)로 변환하고, 지정된 횟수만큼 추
   - 트랜스포머/LLM 인코더: `distilbert`, `clip_text`
 - **정밀도 선택 (FP32/INT8)**:
   - **FP32**: `torch.export` 및 `to_edge_transform_and_lower` API를 사용하여 FP32 모델을 `.pte` 파일로 자동 변환합니다.
-  - **INT8 (PTQ)**: ExecuTorch의 `XNNPACKQuantizer`를 활용한 Post-Training Quantization(학습 후 양자화) 기능을 구현했습니다. `per-tensor` 방식을 사용하여 런타임 호환성을 확보했습니다.
+  - **INT8 (PTQ)**: ExecuTorch의 `XNNPACKQuantizer`를 활용한 Post-Training Quantization(학습 후 양자화) 기능을 구현했습니다. **per-channel 양자화**를 사용하여 2-4배의 성능 향상을 달성했습니다 (ResNet18: 4.2x, MobileNetV2: 1.7x speedup).
 - **델리게이트 지원**: ExecuTorch 백엔드로 `XNNPACK` (CPU 최적화) 또는 `Portable` (범용)을 선택하여 컴파일 및 실행할 수 있습니다. (INT8 양자화는 XNNPACK 델리게이트에 최적화되어 있습니다.)
 - **벤치마킹**: 지정된 `repeat` 횟수만큼 추론을 실행하여 평균/최소/최대 Latency(ms), 표준편차, p95/p99 백분위수 등 상세 성능 지표를 측정합니다.
 - **자동 파일 관리**: 생성된 임시 `temp_*.pte` 파일은 벤치마크 완료 후 자동으로 삭제됩니다.
@@ -23,20 +23,36 @@ PyTorch 모델을 ExecuTorch(`.pte`)로 변환하고, 지정된 횟수만큼 추
 - **(참고)** 현재 `run_bench.py`는 `benchmark_logic.py`와 동기화되지 않았으며, 초기 버전의 로직을 포함하고 있습니다. 최신 기능과 모델 지원은 GUI 버전을 사용해주세요.
 
 
-### GUI 인터페이스 (`benchmark_gui.py`)
+### GUI 인터페이스 (`benchmark_gui_with_compare.py`)
 
-- Tkinter를 사용하여 개발된 사용자 친화적인 그래픽 인터페이스입니다.
+- Tkinter를 사용하여 개발된 사용자 친화적인 그래픽 인터페이스로, **2개의 탭**으로 구성되어 있습니다.
+
+#### Tab 1: Run Benchmark (벤치마크 실행)
 - 정밀도 선택: `FP32`와 `INT8 (PT2E Quant)`를 선택할 수 있는 드롭다운 메뉴를 제공합니다.
 - 모델 선택 드롭다운 (지원 목록 자동 로드), 반복 횟수 설정 (모델별 추천값 제공), 델리게이트 선택 (라디오 버튼) 기능을 제공합니다.
 - `threading`과 `queue`를 사용하여 백그라운드에서 벤치마크를 실행하므로, 컴파일이나 실행 중에도 GUI가 멈추지 않습니다.
 - 실행 로그와 최종 결과(JSON)를 실시간으로 텍스트 창에 표시합니다.
 - 벤치마크 결과를 JSON 파일로 저장하는 기능을 제공하며, 파일명에 모델과 델리게이트 정보(`모델명_정밀도_델리게이트명.json`)를 자동으로 포함합니다.
 
+#### Tab 2: Compare Results (결과 비교 대시보드)
+- `docs/` 폴더에 저장된 벤치마크 결과(JSON)를 자동으로 로드하여 시각화합니다.
+- **3가지 비교 차트 제공**:
+  - **FP32 vs INT8**: XNNPACK 델리게이트에서 정밀도별 성능 비교
+  - **XNNPACK vs Portable**: FP32 정밀도에서 델리게이트별 성능 비교
+  - **INT8 Speedup**: FP32 대비 INT8의 속도 향상 배율 표시
+- matplotlib를 사용한 인터랙티브 차트로 시각적 분석을 지원합니다.
+- 차트 내보내기 기능(PNG/PDF/SVG)을 제공하여 결과를 문서화할 수 있습니다.
+- 자동 필터링: 극단적으로 느린 모델(segformer_b0: 250ms)을 차트에서 분리하여 다른 모델(2~13ms)의 차이를 명확하게 비교할 수 있습니다.
+
+### 분석 및 시각화 모듈
+- **`benchmark_analyzer.py`**: JSON 결과 파일 로딩 및 비교 분석 유틸리티
+- **`benchmark_visualizer.py`**: matplotlib 기반 차트 생성 (정밀도 비교, 델리게이트 비교, 속도 향상 분석)
+
 
 
 ## 개발 환경
 
-- **Python**: `3.10.19` 
+- **Python**: `3.10.19`
 - 필수 패키지 (자세한 버전은 `requirements.txt` 참조)
   - torch==2.9.0
   - torchvision==0.24.0
@@ -44,6 +60,7 @@ PyTorch 모델을 ExecuTorch(`.pte`)로 변환하고, 지정된 횟수만큼 추
   - pytest==8.4.2
   - numpy==2.2.6
   - transformers==4.57.1
+  - matplotlib>=3.5.0 (차트 시각화용)
 - 실행 환경: x64 Native Tools Command Prompt for VS 2022 (관리자 권한)
 
 
@@ -74,11 +91,13 @@ PyTorch 모델을 ExecuTorch(`.pte`)로 변환하고, 지정된 횟수만큼 추
 
 5. **실행**
 
-   - **GUI 버전 (권장)**
+   - **GUI 버전 (권장) - 비교 대시보드 포함**
 
      ```bash
-     python benchmark_gui.py
+     python benchmark_gui_with_compare.py
      ```
+
+     Tab 1에서 벤치마크를 실행하고 결과를 `docs/` 폴더에 저장한 후, Tab 2에서 시각화된 비교 차트를 확인할 수 있습니다.
 
    - CLI 버전 (델리게이트 XNNPACK 고정)
 
@@ -113,11 +132,17 @@ PyTorch 모델을 ExecuTorch(`.pte`)로 변환하고, 지정된 횟수만큼 추
 
 ## 현재 이슈 및 제한 사항
 
-1. **(해결됨) INT8 양자화 지원**
-    - **내용**: 안정적인 FP32 벤치마크 기능에 더해, INT8 PTQ(Post-Training Quantization) 기능이 성공적으로 구현되었습니다.
-    - **기술적 해결**: 구현 초기, `per-channel` 양자화 방식(`is_per_channel=True`)이 ExecuTorch 런타임에서 `Missing out variants: {'quantized_decomposed::dequantize_per_channel'}` 오류를 일으키는 호환성 문제를 발견했습니다.
-    - **해결**: 이는 런타임 호환성이 더 높은 **`per-tensor`** (`is_per_channel=False`) 양자화로 변경하고, `EdgeCompileConfig`에 **`_skip_dim_order=True`** 플래그를 추가하여 해결했습니다.
-    - **결과**: 사용자는 이제 GUI에서 FP32와 INT8의 성능을 직접 비교할 수 있습니다. (예: `mobilenet_v2` + `XNNPACK` 기준, INT8이 FP32 대비 약 1.4배의 속도 향상 및 높은 안정성을 보임)
+1. **(최적화 완료) INT8 양자화 성능 개선**
+    - **초기 문제**: `per-channel` 양자화가 ExecuTorch 런타임 호환성 문제로 `per-tensor` 방식을 사용했으나, 성능 향상이 미미했습니다 (1.4배 수준).
+    - **해결 과정**:
+      1. **per-channel 양자화 재적용**: 컴파일 경로 최적화를 통해 `per-channel` 양자화를 안정적으로 사용할 수 있게 되었습니다.
+      2. **통합 컴파일 경로**: FP32와 동일한 `to_edge_transform_and_lower()` API를 INT8에도 적용하여 최적화 수준을 일치시켰습니다.
+    - **결과**: INT8 성능이 대폭 향상되어 **1.7배~4.2배의 속도 향상**을 달성했습니다:
+      - ResNet18: 12.78ms → 3.03ms (4.2x speedup)
+      - MobileNetV2: 2.43ms → 1.42ms (1.7x speedup)
+      - CLIP Text: 5.56ms → 3.19ms (1.74x speedup)
+      - DistilBERT: 4.99ms → 2.86ms (1.74x speedup)
+    - **비교 대시보드**: GUI Tab 2에서 FP32/INT8, XNNPACK/Portable 성능을 시각적으로 비교할 수 있습니다.
 2. **`gpt2` 모델 Export 실패**:
    - `gpt2` 모델은 FP32 Export 단계 (`torch.export.export` 호출 시)에서 `AttributeError: 'FakeTensor' object has no attribute 'get_seq_length'` 오류가 발생하며 실패했습니다.
    - 이는 `gpt2` 모델 내부 구현이 `torch.export`의 트레이싱 방식(FakeTensor 사용)과 호환되지 않기 때문으로 분석됩니다.
