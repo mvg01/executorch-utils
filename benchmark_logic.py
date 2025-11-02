@@ -160,14 +160,14 @@ def run_full_benchmark_task(
                 training_gm = torch.export.export_for_training(model, example_args).module()
             log_callback("     Training GraphModule created.")
 
-            # Step 2: Quantizer 설정 (per-tensor)
+            # Step 2: Quantizer 설정 (per-channel for better performance)
             log_callback("  2. Setting up XNNPACKQuantizer...")
             quantizer = XNNPACKQuantizer()
             quantization_config = get_symmetric_quantization_config(
-                is_per_channel=False 
+                is_per_channel=True  # 🆕 변경: per-channel 양자화로 성능 개선
             )
             quantizer.set_global(quantization_config)
-            log_callback("     Quantizer configured (per-tensor).")
+            log_callback("     Quantizer configured (per-channel - optimized for speed).")
 
             # Step 3: Prepare 
             log_callback("  3. Preparing model (prepare_pt2e)...")
@@ -201,21 +201,34 @@ def run_full_benchmark_task(
                 )
             log_callback("     Quantized model exported.")
             
-            # --- Phase 3 & 4 (INT8): to_edge + Lowering ---
-            log_callback(f"\n[Phase 3] Converting to EdgeProgram and Lowering ({delegate})...")
-            
-            partitioners = [XnnpackPartitioner()] if delegate == "xnnpack" else []
-            
-            # [FIX] to_edge_transform_and_lower 대신 to_edge + to_backend 사용 (양자화 필수)
-            edge_config = EdgeCompileConfig(_check_ir_validity=False, _skip_dim_order=True)
-            edge_program = edge_program = edge_program = to_edge(exported_program, compile_config=edge_config)
-            
+            # --- Phase 3 & 4 (INT8): 최적화된 경로 시도 ---
+            log_callback(f"[Phase 3] Converting to EdgeProgram and Lowering ({delegate})...")
+
+            # 🆕 변경: FP32와 동일한 최적화 경로 사용 (per-channel 양자화와 함께)
             if delegate == "xnnpack":
-                program = edge_program.to_backend(partitioners[0]).to_executorch()
-                log_callback("     XNNPACK Lowering applied (INT8).")
+                partitioners = [XnnpackPartitioner()]
+                log_callback("     Using optimized XNNPACK path for INT8...")
             else:
-                program = edge_program.to_executorch()
-                log_callback("     Portable Lowering applied (INT8).")
+                partitioners = []
+                log_callback("     Using Portable path for INT8...")
+
+            try:
+                # 최적화된 API 시도 (FP32와 동일)
+                program = to_edge_transform_and_lower(
+                    exported_program,
+                    partitioner=partitioners
+                ).to_executorch()
+                log_callback(f"     ✓ INT8 compiled with optimized path ({delegate}).")
+            except Exception as opt_err:
+                # Fallback: 기존 방식
+                log_callback(f"     Optimized path failed: {str(opt_err)[:50]}, using fallback...")
+                edge_config = EdgeCompileConfig(_check_ir_validity=False, _skip_dim_order=True)
+                edge_program = to_edge(exported_program, compile_config=edge_config)
+                if partitioners:
+                    program = edge_program.to_backend(partitioners[0]).to_executorch()
+                else:
+                    program = edge_program.to_executorch()
+                log_callback(f"     INT8 compiled with fallback path ({delegate}).")
                 
         else:
             # --- FP32 PATH ---
