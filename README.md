@@ -116,9 +116,18 @@ PyTorch 모델을 ExecuTorch(`.pte`)로 변환하고, 지정된 횟수만큼 추
 
 ## 실행 결과 예시
 
-### GUI 프로그램 실행
+### GUI 프로그램 실행 Run Benchmark
 
-<img width="977" height="873" alt="image" src="https://github.com/user-attachments/assets/48edea7a-8533-40e4-abc2-7cac5f9617fc" />
+<img width="1002" height="730" alt="image" src="https://github.com/user-attachments/assets/d92fe999-4083-44c4-8cb5-8b0e2b41afd0" />
+
+### GUI 프로그램 실행 Compare Results
+
+<img width="1002" height="730" alt="image" src="https://github.com/user-attachments/assets/ee594905-18d0-49ca-ba93-3638b6b47761" />
+
+### GUI 프로그램 실행 Compare Results 
+
+<img width="1002" height="730" alt="image" src="https://github.com/user-attachments/assets/8f9735eb-0c12-4409-9210-8d14bfbb100d" />
+
 
 ### CLI 프로그램 실행
 
